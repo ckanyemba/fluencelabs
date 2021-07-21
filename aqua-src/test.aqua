@@ -1,11 +1,12 @@
-service OpH("op"):
-  get_str(s: string) -> string
-  get_arr() -> []string
-  identity: ⊤ -> ⊥
+service StringOp("op"):
+    array(s: string) -> []string
 
-func registerKeyPutValue(node_id: string) -> []string:
-  nodes <- OpH.get_arr()
-  for n <- nodes par:
-    on n:
-      OpH.get_str(node_id)
-  <- nodes
+func use_name1() -> []string:
+    res <- StringOp.array("hello")
+    <- res
+
+func use_name2() -> [][]string:
+    results2: *[]string
+    results2 <- StringOp.array("hello")
+    results2 <- use_name1()
+    <- results2

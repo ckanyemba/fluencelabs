@@ -24,7 +24,7 @@ object Test extends IOApp.Simple {
         List(Paths.get("./aqua")),
         Paths.get("./target"),
         TypeScriptBackend,
-        BodyConfig()
+        BodyConfig(wrapWithXor = false)
       )
       .map {
         case Validated.Invalid(errs) =>
