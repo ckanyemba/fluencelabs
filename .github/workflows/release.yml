@@ -1,24 +1,19 @@
 name: "release"
 
 on:
-  push:
-    # uncomment to release only on tags starting with 'v'
-    # tags:
-    #   - "v*"
-    branches:
-      - "main"
-
   workflow_dispatch:
     inputs:
-      release:
-        description: "Draft or public release?\nPut 'draft' to make a draft release"
-        required: false
-        default: 'public'
+      do_release:
+        description: "Set to 'true' to make a GitHub release"
+        required: true
+        default: "false"
 
 jobs:
   release:
-    name: "Release"
+    name: "Publish ${{ github.event.inputs.do_release == 'true' && 'and release' || 'to NPM' }}"
     runs-on: "ubuntu-latest"
+    env:
+      DO_RELEASE: ${{ github.event.inputs.do_release || 'false' }}
 
     steps:
       - name: Checkout repository
@@ -27,13 +22,11 @@ jobs:
       ### Setup
       - uses: olafurpg/setup-scala@v10
 
-      ### Update & build
-      - name: Assembly
-        run: sbt cli/assembly
+      - name: JS build
+        run: sbt cliJS/fullLinkJS
         env:
           BUILD_NUMBER: ${{ github.run_number }}
 
-      ### Create release
       - name: Get project version
         # In CI sbt appends a new line after its output, so we need `tail -n3 | head -n2` to get last two non-empty lines
         run: |
@@ -56,53 +49,62 @@ jobs:
         env:
           BUILD_NUMBER: ${{ github.run_number }}
 
-      - name: Check .jar exists
+      - name: Check .js exists
         run: |
-          JAR="cli/target/scala-2.13/aqua-cli-${{ env.VERSION }}.jar"
-          stat "$JAR"
-          echo "JAR=$JAR" >> $GITHUB_ENV
+          JS="cli/.js/target/scala-3.0.2/cli-opt/aqua-${{ env.VERSION }}.js"
+          mv cli/.js/target/scala-3.0.2/cli-opt/main.js "$JS"
+          stat "$JS"
+          echo "JS=$JS" >> $GITHUB_ENV
 
       ### Publish to NPM registry
       - uses: actions/setup-node@v1
         with:
-          node-version: "14"
+          node-version: "15"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Install jq and prepare package
-        run: |
-          sudo apt-get update && sudo apt-get --yes --force-yes install jq
-          PKG_NAME="$(cat package.json | jq -r .name)"
-          cp ${{ env.JAR }} ./npm/aqua-cli.jar
+      - run: cp ${{ env.JS }} ./npm/aqua.js
 
       - run: npm version ${{ env.VERSION }}
         working-directory: ./npm
 
-      - run: npm publish --access public
+      - name: Publish to NPM as aqua
+        run: npm publish --access public
         working-directory: ./npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Determine if release should be drafted
-        run: |
-          set -x
-          if [ "${{ github.event.inputs.release }}" = "public" ]; then
-            echo "DRAFT=false" >> $GITHUB_ENV
-          else
-            echo "DRAFT=true" >> $GITHUB_ENV
-          fi
-
       ### create release
-      - uses: marvinpinto/action-automatic-releases@latest
-        # if inputs.release if an empty string, we're running automatically
-        if: ${{ github.event.inputs.release != '' }}
+
+      # 'Push tag' will fail if such tag already exists
+      - name: Push tag ${{ env.BASE_VERSION }}
+        if: ${{ env.DO_RELEASE == 'true' }}
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v5.5
         with:
-          # changelog will be automatically generated from the history
-          # between tag env.BASE_VERSION (eg 0.1.0 or 0.2.0, etc)
-          # and the current commit
-          automatic_release_tag: "${{ env.BASE_VERSION }}"
-          title: "Aqua Compiler ${{ env.VERSION }}"
-          files: |
-            ${{ env.JAR }}
-          draft: ${{ env.DRAFT }}
+          custom_tag: ${{ env.BASE_VERSION }}
+          tag_prefix: ""
+          github_token: ${{ secrets.PERSONAL_TOKEN }}
+
+      - name: Build Changelog
+        if: ${{ env.DO_RELEASE == 'true' }}
+        id: github_release
+        uses: mikepenz/release-changelog-builder-action@v1
+        with:
+          configuration: ".github/workflows/changelog_config.json"
+          toTag: ${{ steps.tag_version.outputs.new_tag }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release
+        if: ${{ env.DO_RELEASE == 'true' }}
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Aqua Compiler ${{ env.VERSION }}
+          tag_name: ${{ steps.tag_version.outputs.new_tag }}
+          body: ${{ steps.github_release.outputs.changelog }}
+          draft: false
           prerelease: false
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          files: |
+            ${{ env.JS }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

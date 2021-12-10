@@ -5,24 +5,26 @@ import aqua.parser.expr.DataStructExpr
 import aqua.semantics.Prog
 import aqua.semantics.rules.names.NamesAlgebra
 import aqua.semantics.rules.types.TypesAlgebra
-import aqua.types.ProductType
-import cats.free.Free
+import aqua.types.StructType
 import cats.syntax.functor._
+import cats.syntax.applicative._
+import cats.syntax.flatMap._
+import cats.Monad
 
-class DataStructSem[F[_]](val expr: DataStructExpr[F]) extends AnyVal {
+class DataStructSem[S[_]](val expr: DataStructExpr[S]) extends AnyVal {
 
-  def program[Alg[_]](implicit
-    N: NamesAlgebra[F, Alg],
-    T: TypesAlgebra[F, Alg]
+  def program[Alg[_]: Monad](implicit
+    N: NamesAlgebra[S, Alg],
+    T: TypesAlgebra[S, Alg]
   ): Prog[Alg, Model] =
     Prog.after((_: Model) =>
       T.purgeFields(expr.name).flatMap {
         case Some(fields) =>
           T.defineDataType(expr.name, fields) as (TypeModel(
             expr.name.value,
-            ProductType(expr.name.value, fields)
+            StructType(expr.name.value, fields)
           ): Model)
-        case None => Free.pure[Alg, Model](Model.error("Data struct types unresolved"))
+        case None => Model.error("Data struct types unresolved").pure[Alg]
       }
     )
 

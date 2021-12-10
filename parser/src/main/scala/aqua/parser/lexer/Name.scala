@@ -7,15 +7,34 @@ import cats.Comonad
 import cats.parse.{Parser => P}
 import cats.syntax.functor._
 import cats.syntax.comonad._
+import cats.~>
+import aqua.parser.lift.Span
+import aqua.parser.lift.Span.{P0ToSpan, PToSpan}
 
 case class Name[F[_]: Comonad](name: F[String]) extends Token[F] {
   override def as[T](v: T): F[T] = name.as(v)
+
+  override def mapK[K[_]: Comonad](fk: F ~> K): Name[K] = copy(fk(name))
+
+  def rename(newName: String): Name[F] = copy(name.as(newName))
 
   def value: String = name.extract
 }
 
 object Name {
 
-  def p[F[_]: LiftParser: Comonad]: P[Name[F]] =
+  type As[F[_]] = (Name[F], Option[Name[F]])
+
+  val p: P[Name[Span.S]] =
     `name`.lift.map(Name(_))
+
+  val upper: P[Name[Span.S]] =
+    NAME.lift.map(Name(_))
+
+  val dotted: P[Name[Span.S]] =
+    ((`Class` ~ `.`).backtrack.rep0.?.with1 ~ P.oneOf(`name` :: NAME :: Nil)).string.lift
+      .map(Name(_))
+
+  val nameAs: P[As[Span.S]] =
+    asOpt(p)
 }

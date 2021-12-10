@@ -1,6 +1,7 @@
 package aqua.parser.lift
 
-import cats.parse.{LocationMap, Parser0, Parser => P}
+import cats.data.NonEmptyList
+import cats.parse.{LocationMap, Parser0, Parser as P}
 import cats.{Comonad, Eval}
 
 import scala.language.implicitConversions
@@ -54,12 +55,14 @@ object Span {
     }
 
     def toConsoleStr(
-      msg: String,
+      msgs: List[String],
       onLeft: String,
       onRight: String = Console.RESET
     ): String = {
       val line3Length = line._3.length
       val line3Mult = if (line3Length == 0) 1 else line3Length
+      val message = msgs.map(m => (" " * (line._2.length + lastNSize + 1)) + m).mkString("\n")
+
       pre.map(formatLine(_, onLeft, onRight)).mkString("\n") +
         "\n" +
         formatLN(line._1, onLeft, onRight) +
@@ -75,28 +78,36 @@ object Span {
         ("=" * line._4.length) +
         onRight +
         "\n" +
-        (" " * (line._2.length + lastNSize + 1)) +
         onLeft +
-        msg +
+        message +
         onRight +
         "\n" +
         post.map(formatLine(_, onLeft, onRight)).mkString("\n")
     }
   }
 
-  type F[T] = (Span, T)
+  type S[T] = (Span, T)
 
-  implicit object spanComonad extends Comonad[F] {
-    override def extract[A](x: F[A]): A = x._2
+  implicit object spanComonad extends Comonad[S] {
+    override def extract[A](x: S[A]): A = x._2
 
-    override def coflatMap[A, B](fa: F[A])(f: F[A] ⇒ B): F[B] = fa.copy(_2 = f(fa))
+    override def coflatMap[A, B](fa: S[A])(f: S[A] ⇒ B): S[B] = fa.copy(_2 = f(fa))
 
-    override def map[A, B](fa: F[A])(f: A ⇒ B): F[B] = fa.copy(_2 = f(fa._2))
+    override def map[A, B](fa: S[A])(f: A ⇒ B): S[B] = fa.copy(_2 = f(fa._2))
   }
 
-  implicit object spanLiftParser extends LiftParser[F] {
+  implicit class PToSpan[T](p: P[T]) {
+    def lift: P[Span.S[T]] = Span.spanLiftParser.lift(p)
+  }
 
-    override def lift[T](p: P[T]): P[F[T]] =
+  implicit class P0ToSpan[T](p: Parser0[T]) {
+    def lift0: Parser0[Span.S[T]] = Span.spanLiftParser.lift0(p)
+  }
+
+
+  implicit object spanLiftParser extends LiftParser[S] {
+
+    override def lift[T](p: P[T]): P[S[T]] =
       (P.index.with1 ~ p ~ P.index).map { case ((s, v), e) ⇒
         (Span(s, e), v)
       }
@@ -105,6 +116,10 @@ object Span {
       (P.index ~ p0).map { case (i, v) ⇒
         (Span(i, i), v)
       }
+
+    override def wrapErr(e: P.Error): (Span, P.Error) = {
+      (Span(e.failedAtOffset, e.failedAtOffset + 1), e)
+    }
   }
 
 }

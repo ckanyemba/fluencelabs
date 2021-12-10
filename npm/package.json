@@ -1,12 +1,26 @@
 {
-  "name": "@fluencelabs/aqua-cli",
+  "name": "@fluencelabs/aqua",
   "version": "0.0.0",
   "description": "Aqua compiler",
+  "type": "module",
   "files": [
-    "aqua-cli.jar"
+    "aqua.js",
+    "index.js",
+    "error.js",
+    "utils.js"
   ],
-  "bin": "index.js",
-  "scripts": {},
+  "bin": {
+    "aqua": "index.js",
+    "aqua-cli": "error.js"
+  },
+  "scripts": {
+    "run": "node index.js",
+    "from:scalajs": "cp ../cli/.js/target/scala-3.0.2/cli-opt/main.js ./aqua.js && npm run run -- $@"
+  },
+  "dependencies": {
+    "@fluencelabs/fluence": "0.15.2",
+    "@fluencelabs/aqua-lib": "0.2.1"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fluencelabs/aqua.git"

@@ -1,7 +1,8 @@
 package aqua.model.func.raw
 
 import aqua.model.ValueModel
-import aqua.model.func.Call
+import aqua.model.func.{Call, FuncModel}
+import cats.data.NonEmptyList
 import cats.data.Chain
 
 sealed trait RawTag {
@@ -22,10 +23,33 @@ sealed trait RawTag {
         funcName,
         call.mapValues(f)
       )
+    case PushToStreamTag(operand, exportTo) =>
+      PushToStreamTag(
+        f(operand),
+        exportTo
+      )
+    case CanonicalizeTag(operand, exportTo) =>
+      CanonicalizeTag(
+        f(operand),
+        exportTo
+      )
     case AssignmentTag(value, assignTo) =>
       AssignmentTag(f(value), assignTo)
+    case ReturnTag(values) =>
+      ReturnTag(values.map(f))
+    case DeclareStreamTag(value) =>
+      DeclareStreamTag(f(value))
     case AbilityIdTag(value, ability) =>
       AbilityIdTag(f(value), ability)
+    case ClosureTag(func) =>
+      ClosureTag(
+        func.copy(arrow =
+          func.arrow.copy(
+            ret = func.arrow.ret.map(f),
+            body = FuncOp(func.arrow.body.tree.map(_.mapValues(f)))
+          )
+        )
+      )
     case _ => this
   }
 
@@ -54,6 +78,7 @@ case class OnTag(peerId: ValueModel, via: Chain[ValueModel]) extends SeqGroupTag
     s"(on $peerId${if (via.nonEmpty) " via " + via.toList.mkString(" via ") else ""})"
 }
 case class NextTag(item: String) extends RawTag
+case class RestrictionTag(name: String, isStream: Boolean) extends SeqGroupTag
 
 case class MatchMismatchTag(left: ValueModel, right: ValueModel, shouldMatch: Boolean)
     extends SeqGroupTag
@@ -64,10 +89,24 @@ case class CallArrowTag(
   call: Call
 ) extends RawTag
 
+case class DeclareStreamTag(
+  value: ValueModel
+) extends NoExecTag
+
 case class AssignmentTag(
   value: ValueModel,
   assignTo: String
 ) extends NoExecTag
+
+case class ClosureTag(
+  func: FuncModel
+) extends NoExecTag
+
+case class ReturnTag(
+  values: NonEmptyList[ValueModel]
+) extends NoExecTag
+
+object EmptyTag extends NoExecTag
 
 case class AbilityIdTag(
   value: ValueModel,
@@ -80,4 +119,12 @@ case class CallServiceTag(
   call: Call
 ) extends RawTag {
   override def toString: String = s"(call _ ($serviceId $funcName) $call)"
+}
+
+case class PushToStreamTag(operand: ValueModel, exportTo: Call.Export) extends RawTag {
+  override def toString: String = s"(push $operand $exportTo)"
+}
+
+case class CanonicalizeTag(operand: ValueModel, exportTo: Call.Export) extends RawTag {
+  override def toString: String = s"(can $operand $exportTo)"
 }

@@ -3,7 +3,7 @@ package aqua.model
 import aqua.types._
 import cats.Eq
 import cats.data.{Chain, NonEmptyMap}
-import wvlet.log.LogSupport
+import scribe.Logging
 
 sealed trait ValueModel {
   def `type`: Type
@@ -36,6 +36,11 @@ object LiteralModel {
   def quote(str: String): LiteralModel = LiteralModel("\"" + str + "\"", ScalarType.string)
 
   val initPeerId: LiteralModel = LiteralModel("%init_peer_id%", ScalarType.string)
+
+  val nil: LiteralModel = LiteralModel(
+    "[]",
+    StreamType(BottomType)
+  )
 }
 
 sealed trait LambdaModel {
@@ -46,7 +51,8 @@ case class IntoFieldModel(field: String, `type`: Type) extends LambdaModel
 case class IntoIndexModel(idx: Int, `type`: Type) extends LambdaModel
 
 case class VarModel(name: String, `type`: Type, lambda: Chain[LambdaModel] = Chain.empty)
-    extends ValueModel with LogSupport {
+    extends ValueModel with Logging {
+
   def deriveFrom(vm: VarModel): VarModel = vm.copy(lambda = vm.lambda ++ lambda)
 
   override val lastType: Type = lambda.lastOption.map(_.`type`).getOrElse(`type`)
@@ -81,7 +87,7 @@ case class VarModel(name: String, `type`: Type, lambda: Chain[LambdaModel] = Cha
                     deriveFrom(nvm)
                   case valueModel =>
                     if (lambda.nonEmpty)
-                      error(
+                      logger.error(
                         s"Var $name derived from scalar $valueModel, but lambda is lost: $lambda"
                       )
                     valueModel
@@ -91,8 +97,10 @@ case class VarModel(name: String, `type`: Type, lambda: Chain[LambdaModel] = Cha
             deriveFrom(vv)
         }
 
-      case Some(vv) => vv // TODO check that lambda is empty, otherwise error
-      case None => this // Should not happen
+      case Some(vv) =>
+        vv // TODO check that lambda is empty, otherwise error
+      case None =>
+        this // Should not happen
     }
 
   override def toString: String =
@@ -104,7 +112,7 @@ object VarModel {
 
   val lastError: VarModel = VarModel(
     "%last_error%",
-    ProductType(
+    StructType(
       "LastError",
       NonEmptyMap.of(
         "instruction" -> ScalarType.string,
@@ -112,10 +120,5 @@ object VarModel {
         "peer_id" -> ScalarType.string
       )
     )
-  )
-
-  val nil: VarModel = VarModel(
-    "nil",
-    StreamType(DataType.Bottom)
   )
 }

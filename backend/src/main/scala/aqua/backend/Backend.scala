@@ -1,18 +1,17 @@
 package aqua.backend
 
-import aqua.model.AquaContext
-import aqua.model.transform.BodyConfig
+import aqua.model.transform.res.AquaRes
 
 /**
- * Compilation result
- * @param suffix extension or another info that will be added to a resulted file
- * @param content a code that is used as an output
- */
-case class Compiled(suffix: String, content: String)
-
-/**
- * Describes how context can be finalized
+ * Compiler backend generates output based on the processed model
  */
 trait Backend {
-  def generate(context: AquaContext, bc: BodyConfig): Seq[Compiled]
+
+  /**
+   * Generate the result based on the given [[AquaRes]]
+   *
+   * @param aqua Source file context, processed, transformed
+   * @return Zero or more [[Generated]] objects, based on arguments
+   */
+  def generate(aqua: AquaRes): Seq[Generated]
 }

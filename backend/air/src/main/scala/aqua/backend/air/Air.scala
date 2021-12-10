@@ -10,6 +10,7 @@ object Keyword {
 
   case object Null extends Keyword("null")
 
+  case object New extends Keyword("new")
   case object Next extends Keyword("next")
 
   case object Fold extends Keyword("fold")
@@ -19,6 +20,8 @@ object Keyword {
   case object Mismatch extends Keyword("mismatch")
 
   case object Call extends Keyword("call")
+
+  case object Ap extends Keyword("ap")
 
   case object Seq extends Keyword("seq")
 
@@ -76,6 +79,8 @@ object Air {
 
   case object Null extends Air(Keyword.Null)
 
+  case class New(item: DataView, instruction: Air) extends Air(Keyword.New)
+
   case class Next(label: String) extends Air(Keyword.Next)
 
   case class Fold(iterable: DataView, label: String, instruction: Air) extends Air(Keyword.Fold)
@@ -94,6 +99,8 @@ object Air {
   case class Call(triplet: Triplet, args: List[DataView], result: Option[String])
       extends Air(Keyword.Call)
 
+  case class Ap(op: DataView, result: String) extends Air(Keyword.Ap)
+
   case class Comment(comment: String, air: Air) extends Air(Keyword.NA)
 
   private def show(depth: Int, air: Air): String = {
@@ -110,6 +117,7 @@ object Air {
           (air match {
             case Air.Null ⇒ ""
             case Air.Next(label) ⇒ s" $label"
+            case Air.New(item, inst) ⇒ s" ${item.show}\n${showNext(inst)}$space"
             case Air.Fold(iter, label, inst) ⇒ s" ${iter.show} $label\n${showNext(inst)}$space"
             case Air.Match(left, right, inst) ⇒
               s" ${left.show} ${right.show}\n${showNext(inst)}$space"
@@ -120,6 +128,7 @@ object Air {
             case Air.Xor(l, r) ⇒ s"\n${showNext(l)}${showNext(r)}$space"
             case Air.Call(triplet, args, res) ⇒
               s" ${triplet.show} [${args.map(_.show).mkString(" ")}]${res.fold("")(" " + _)}"
+            case Air.Ap(operand, result) ⇒ s" ${operand.show} $result"
             case Air.Comment(_, _) => ";; Should not be displayed"
           }) + ")\n"
     }

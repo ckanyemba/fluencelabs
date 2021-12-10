@@ -1,20 +1,20 @@
 package aqua.backend.air
 
-import aqua.model._
+import aqua.model.*
 import aqua.model.func.Call
-import aqua.model.func.resolved._
+import aqua.model.transform.res.*
 import aqua.types.StreamType
 import cats.Eval
 import cats.data.Chain
 import cats.free.Cofree
-import wvlet.log.LogSupport
+import scribe.Logging
 
 sealed trait AirGen {
   def generate: Air
 
 }
 
-object AirGen extends LogSupport {
+object AirGen extends Logging {
 
   def lambdaToString(ls: List[LambdaModel]): String = ls match {
     case Nil => ""
@@ -29,10 +29,10 @@ object AirGen extends LogSupport {
   def valueToData(vm: ValueModel): DataView = vm match {
     case LiteralModel(value, _) => DataView.StringScalar(value)
     case VarModel(name, t, lambda) =>
-      val n = t match {
+      val n = (t match {
         case _: StreamType => "$" + name
         case _ => name
-      }
+      }).replace('.', '_')
       if (lambda.isEmpty) DataView.Variable(n)
       else DataView.VarLens(n, lambdaToString(lambda.toList))
   }
@@ -40,21 +40,26 @@ object AirGen extends LogSupport {
   def opsToSingle(ops: Chain[AirGen]): AirGen = ops.toList match {
     case Nil => NullGen
     case h :: Nil => h
-    case list => list.reduceLeft(SeqGen)
+    case list => list.reduceLeft(SeqGen(_, _))
   }
+
+  def exportToString(exportTo: Call.Export): String = (exportTo match {
+    case Call.Export(name, _: StreamType) => "$" + name
+    case Call.Export(name, _) => name
+  }).replace('.', '_')
 
   private def folder(op: ResolvedOp, ops: Chain[AirGen]): Eval[AirGen] =
     op match {
 //      case mt: MetaTag =>
 //        folder(mt.op, ops).map(ag => mt.comment.fold(ag)(CommentGen(_, ag)))
       case SeqRes =>
-        Eval later ops.toList.reduceLeftOption(SeqGen).getOrElse(NullGen)
+        Eval later ops.toList.reduceLeftOption(SeqGen(_, _)).getOrElse(NullGen)
       case ParRes =>
         Eval later (ops.toList match {
           case o :: Nil => ParGen(o, NullGen)
           case _ =>
-            ops.toList.reduceLeftOption(ParGen).getOrElse {
-              warn("ParRes with no children converted to Null")
+            ops.toList.reduceLeftOption(ParGen(_, _)).getOrElse {
+              logger.warn("ParRes with no children converted to Null")
               NullGen
             }
         })
@@ -62,8 +67,8 @@ object AirGen extends LogSupport {
         Eval later (ops.toList match {
           case o :: Nil => XorGen(o, NullGen)
           case _ =>
-            ops.toList.reduceLeftOption(XorGen).getOrElse {
-              warn("XorRes with no children converted to Null")
+            ops.toList.reduceLeftOption(XorGen(_, _)).getOrElse {
+              logger.warn("XorRes with no children converted to Null")
               NullGen
             }
         })
@@ -80,18 +85,22 @@ object AirGen extends LogSupport {
 
       case FoldRes(item, iterable) =>
         Eval later ForGen(valueToData(iterable), item, opsToSingle(ops))
-      case CallServiceRes(serviceId, funcName, Call(args, exportTo), peerId) =>
+      case RestrictionRes(item, isStream) =>
+        Eval later NewGen(item, isStream, opsToSingle(ops))
+      case CallServiceRes(serviceId, funcName, CallRes(args, exportTo), peerId) =>
         Eval.later(
           ServiceCallGen(
             valueToData(peerId),
             valueToData(serviceId),
             funcName,
             args.map(valueToData),
-            exportTo.map {
-              case Call.Export(name, _: StreamType) => "$" + name
-              case Call.Export(name, _) => name
-            }
+            exportTo.map(exportToString)
           )
+        )
+
+      case ApRes(operand, exportTo) =>
+        Eval.later(
+          ApGen(valueToData(operand), exportToString(exportTo))
         )
 
       case _: NoAir =>
@@ -122,6 +131,12 @@ case class CommentGen(comment: String, op: AirGen) extends AirGen {
     Air.Comment(comment, op.generate)
 }
 
+case class ApGen(operand: DataView, result: String) extends AirGen {
+
+  override def generate: Air =
+    Air.Ap(operand, result)
+}
+
 case class MatchMismatchGen(
   left: DataView,
   right: DataView,
@@ -136,6 +151,12 @@ case class MatchMismatchGen(
 
 case class ForGen(iterable: DataView, item: String, body: AirGen) extends AirGen {
   override def generate: Air = Air.Fold(iterable, item, body.generate)
+}
+
+case class NewGen(item: String, isStream: Boolean, body: AirGen) extends AirGen {
+
+  override def generate: Air =
+    Air.New(if (isStream) DataView.Stream("$" + item) else DataView.Variable(item), body.generate)
 }
 
 case class NextGen(item: String) extends AirGen {

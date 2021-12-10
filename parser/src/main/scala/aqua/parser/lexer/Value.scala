@@ -1,65 +1,78 @@
 package aqua.parser.lexer
 
-import aqua.parser.lexer.Token._
+import aqua.parser.Expr
+import aqua.parser.head.FilenameExpr
+import aqua.parser.lexer.Token.*
 import aqua.parser.lift.LiftParser
-import aqua.parser.lift.LiftParser._
+import aqua.parser.lift.LiftParser.*
 import aqua.types.LiteralType
-import cats.parse.{Numbers, Parser => P}
-import cats.syntax.comonad._
-import cats.syntax.functor._
-import cats.{Comonad, Functor}
+import cats.parse.{Numbers, Parser as P, Parser0 as P0}
+import cats.syntax.comonad.*
+import cats.syntax.functor.*
+import cats.{Comonad, Functor, ~>}
+import aqua.parser.lift.Span
+import aqua.parser.lift.Span.{P0ToSpan, PToSpan}
 
-sealed trait Value[F[_]] extends Token[F]
+sealed trait Value[F[_]] extends Token[F] {
+  def mapK[K[_]: Comonad](fk: F ~> K): Value[K]
+}
 
 case class VarLambda[F[_]](name: Name[F], lambda: List[LambdaOp[F]] = Nil) extends Value[F] {
   override def as[T](v: T): F[T] = name.as(v)
+
+  def mapK[K[_]: Comonad](fk: F ~> K): VarLambda[K] = copy(name.mapK(fk), lambda.map(_.mapK(fk)))
 }
 
 case class Literal[F[_]: Comonad](valueToken: F[String], ts: LiteralType) extends Value[F] {
   override def as[T](v: T): F[T] = valueToken.as(v)
+
+  def mapK[K[_]: Comonad](fk: F ~> K): Literal[K] = copy(fk(valueToken), ts)
 
   def value: String = valueToken.extract
 }
 
 object Value {
 
-  def varLambda[F[_]: LiftParser: Comonad]: P[VarLambda[F]] =
-    (Name.p[F] ~ LambdaOp.ops[F].?).map { case (n, l) ⇒
-      VarLambda(n, l.fold[List[LambdaOp[F]]](Nil)(_.toList))
+  val varLambda: P[VarLambda[Span.S]] =
+    (Name.dotted ~ LambdaOp.ops.?).map { case (n, l) ⇒
+      VarLambda(n, l.fold[List[LambdaOp[Span.S]]](Nil)(_.toList))
     }
 
-  def bool[F[_]: LiftParser: Functor: Comonad]: P[Literal[F]] =
+  val bool: P[Literal[Span.S]] =
     P.oneOf(
       ("true" :: "false" :: Nil)
         .map(t ⇒ P.string(t).lift.map(fu => Literal(fu.as(t), LiteralType.bool)))
     ) <* P.not(`anum_*`)
 
-  def initPeerId[F[_]: LiftParser: Comonad]: P[Literal[F]] =
+  val initPeerId: P[Literal[Span.S]] =
     `%init_peer_id%`.string.lift.map(Literal(_, LiteralType.string))
 
-  def num[F[_]: LiftParser: Comonad]: P[Literal[F]] =
-    (P.char('-').?.with1 ~ Numbers.nonNegativeIntString).lift.map(fu =>
+  val minus = P.char('-')
+  val dot = P.char('.')
+
+  val num: P[Literal[Span.S]] =
+    (minus.?.with1 ~ Numbers.nonNegativeIntString).lift.map(fu =>
       fu.extract match {
         case (Some(_), n) ⇒ Literal(fu.as(s"-$n"), LiteralType.signed)
         case (None, n) ⇒ Literal(fu.as(n), LiteralType.number)
       }
     )
 
-  def float[F[_]: LiftParser: Comonad]: P[Literal[F]] =
-    (P.char('-').?.with1 ~ (Numbers.nonNegativeIntString <* P.char(
-      '.'
-    )) ~ Numbers.nonNegativeIntString).string.lift
+  val float: P[Literal[Span.S]] =
+    (minus.?.with1 ~ (Numbers.nonNegativeIntString <* dot) ~ Numbers.nonNegativeIntString).string.lift
       .map(Literal(_, LiteralType.float))
 
+  val charsWhileQuotes = P.charsWhile0(_ != '"')
+
   // TODO make more sophisticated escaping/unescaping
-  def string[F[_]: LiftParser: Comonad]: P[Literal[F]] =
-    (`"` *> P.charsWhile0(_ != '"') <* `"`).string.lift
+  val string: P[Literal[Span.S]] =
+    (`"` *> charsWhileQuotes <* `"`).string.lift
       .map(Literal(_, LiteralType.string))
 
-  def literal[F[_]: LiftParser: Comonad]: P[Literal[F]] =
+  val literal: P[Literal[Span.S]] =
     P.oneOf(bool.backtrack :: float.backtrack :: num.backtrack :: string :: Nil)
 
-  def `value`[F[_]: LiftParser: Comonad]: P[Value[F]] =
+  val `value`: P[Value[Span.S]] =
     P.oneOf(literal.backtrack :: initPeerId.backtrack :: varLambda :: Nil)
 
 }

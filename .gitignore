@@ -1,4 +1,12 @@
 .idea
 .bsp
+.metals
+.vscode
+.bloop
+metals.sbt
 target
 project/target
+
+.DS_Store
+
+npm/aqua.js

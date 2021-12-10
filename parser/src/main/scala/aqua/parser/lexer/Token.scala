@@ -1,11 +1,13 @@
 package aqua.parser.lexer
 
-import cats.Functor
 import cats.data.NonEmptyList
-import cats.parse.{Accumulator0, Parser => P, Parser0 => P0}
+import cats.parse.{Accumulator0, Parser as P, Parser0 as P0}
+import cats.{Comonad, Functor, ~>}
 
 trait Token[F[_]] {
   def as[T](v: T): F[T]
+
+  def mapK[K[_]: Comonad](fk: F ~> K): Token[K]
 
   def unit: F[Unit] = as(())
 }
@@ -16,17 +18,32 @@ object Token {
   private val AZ = ('A' to 'Z').toSet
   private val f09 = ('0' to '9').toSet
   private val anum = az ++ AZ ++ f09
+  private val upperAnum = AZ ++ f09
   private val f_ = Set('_')
   private val anum_ = anum ++ f_
+  private val upperAnum_ = upperAnum ++ f_
   private val nl = Set('\n', '\r')
+
+  val inAZ = P.charIn(AZ)
+  val inaz = P.charIn(az)
+  val whileAnum = P.charsWhile(anum_)
 
   val ` *` : P0[String] = P.charsWhile0(fSpaces)
   val ` ` : P[String] = P.charsWhile(fSpaces)
   val `const`: P[Unit] = P.string("const")
   val `data`: P[Unit] = P.string("data")
   val `import`: P[Unit] = P.string("import")
+  val `module`: P[Unit] = P.string("module")
+  val `declares`: P[Unit] = P.string("declares")
+  val ` declares ` : P[Unit] = `declares`.surroundedBy(` `)
+  val `declare`: P[Unit] = P.string("declare")
+  val `_export`: P[Unit] = P.string("export")
+  val `star`: P[Unit] = P.char('*')
   val `use`: P[Unit] = P.string("use")
+  val `from`: P[Unit] = P.string("from")
+  val ` from ` : P[Unit] = `from`.surroundedBy(` `)
   val `as`: P[Unit] = P.string("as")
+  val ` as ` : P[Unit] = `as`.surroundedBy(` `)
   val `alias`: P[Unit] = P.string("alias")
   val `service`: P[Unit] = P.string("service")
   val `func`: P[Unit] = P.string("func")
@@ -45,11 +62,12 @@ object Token {
   val `co`: P[Unit] = P.string("co")
   val `:` : P[Unit] = P.char(':')
   val ` : ` : P[Unit] = P.char(':').surroundedBy(` `.?)
-  val `anum_*` : P[Unit] = P.charsWhile(anum_).void
+  val `anum_*` : P[Unit] = whileAnum.void
 
-  val `name`: P[String] = (P.charIn(az) ~ P.charsWhile(anum_).?).string
+  val NAME: P[String] = (inAZ ~ P.charsWhile(upperAnum_).?).string
+  val `name`: P[String] = (inaz ~ whileAnum.?).string
 
-  val `Class`: P[String] = (P.charIn(AZ) ~ P.charsWhile(anum_).?).map { case (c, s) ⇒
+  val `Class`: P[String] = (inAZ ~ whileAnum.backtrack.?).map { case (c, s) ⇒
     c.toString ++ s.getOrElse("")
   }
   val `\n` : P[Unit] = P.string("\n\r") | P.char('\n') | P.string("\r\n")
@@ -59,15 +77,17 @@ object Token {
     (` `.?.void *> (`--` *> P.charsWhile0(_ != '\n')).?.void).with1 *> `\n`
 
   val ` \n+` : P[Unit] = P.repAs[Unit, Unit](` \n`.backtrack, 1)(Accumulator0.unitAccumulator0)
+  val ` \n*` : P0[Unit] = P.repAs0[Unit, Unit](` \n`.backtrack)(Accumulator0.unitAccumulator0)
   val ` : \n+` : P[Unit] = ` `.?.with1 *> `:` *> ` \n+`
   val `,` : P[Unit] = P.char(',') <* ` `.?
   val `.` : P[Unit] = P.char('.')
   val `"` : P[Unit] = P.char('"')
   val `*` : P[Unit] = P.char('*')
-  val `!` : P[Unit] = P.char('!')
+  val exclamation: P[Unit] = P.char('!')
   val `[]` : P[Unit] = P.string("[]")
   val `⊤` : P[Unit] = P.char('⊤')
   val `⊥` : P[Unit] = P.char('⊥')
+  val `∅` : P[Unit] = P.char('∅')
   val `(` : P[Unit] = P.char('(').surroundedBy(` `.?)
   val `)` : P[Unit] = P.char(')').surroundedBy(` `.?)
   val `()` : P[Unit] = P.string("()")
@@ -82,6 +102,8 @@ object Token {
 
   case class LiftToken[F[_]: Functor, A](point: F[A]) extends Token[F] {
     override def as[T](v: T): F[T] = Functor[F].as(point, v)
+    override def mapK[K[_]: Comonad](fk: F ~> K): LiftToken[K, A] =
+      copy(fk(point))
   }
 
   def lift[F[_]: Functor, A](point: F[A]): Token[F] = LiftToken(point)
@@ -91,4 +113,7 @@ object Token {
 
   def comma0[T](p: P[T]): P0[List[T]] =
     P.repSep0(p, `,` <* ` \n+`.rep0)
+
+  def asOpt[T](p: P[T]): P[(T, Option[T])] =
+    p ~ (` as `.backtrack *> p).?
 }

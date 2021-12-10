@@ -1,15 +1,14 @@
 package aqua.backend.air
 
-import aqua.model.func.FuncCallable
-import aqua.model.transform.{BodyConfig, Transform}
+import aqua.model.transform.res.FuncRes
 
-case class FuncAirGen(func: FuncCallable) {
+case class FuncAirGen(func: FuncRes) {
 
   /**
    * Generates AIR from the function body
    */
-  def generateAir(conf: BodyConfig = BodyConfig()): Air =
+  def generate: Air =
     AirGen(
-      Transform.forClient(func, conf)
+      func.body
     ).generate
 }

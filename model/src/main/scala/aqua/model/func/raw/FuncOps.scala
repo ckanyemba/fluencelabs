@@ -8,11 +8,19 @@ import cats.free.Cofree
 object FuncOps {
 
   def noop: FuncOp =
-    FuncOp.leaf(CallServiceTag(LiteralModel.quote("op"), "identity", Call(Nil, None)))
+    FuncOp.leaf(CallServiceTag(LiteralModel.quote("op"), "noop", Call(Nil, Nil)))
 
-  def identity(what: ValueModel, to: Call.Export): FuncOp =
+  def pushToStream(what: ValueModel, to: Call.Export): FuncOp =
     FuncOp.leaf(
-      CallServiceTag(LiteralModel.quote("op"), "identity", Call(what :: Nil, Some(to)))
+      PushToStreamTag(what, to)
+    )
+
+  /**
+   * Canonicalizes [[what]] into [[to]], [[what]] is expected to be a stream
+   */
+  def canonicalize(what: ValueModel, to: Call.Export): FuncOp =
+    FuncOp.leaf(
+      CanonicalizeTag(what, to)
     )
 
   def callService(srvId: ValueModel, funcName: String, call: Call): FuncOp =
@@ -78,4 +86,8 @@ object FuncOps {
 
   def next(item: String): FuncOp =
     FuncOp.leaf(NextTag(item))
+
+  lazy val empty: FuncOp =
+    FuncOp.leaf(EmptyTag)
+
 }

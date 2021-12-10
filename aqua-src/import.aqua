@@ -1,0 +1,15 @@
+service GetStr("multiret-test"):
+    retStr(s: *string, a: *string)
+
+
+func foo_wrapper():
+    GetStr.retStr(nil, nil)
+
+func invalid_append() -> *string:
+    stream: *string
+    cream: *string
+    dream: *string
+    str: *string
+    asdasd: *string
+    GetStr.retStr(stream, nil)
+    <- stream
